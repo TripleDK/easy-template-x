@@ -82,7 +82,7 @@ export class TemplateHandler {
             docx,
             currentPart: null
         };
-
+        context.docx.contentTypes.count();
         const contentParts = await docx.getContentParts();
         for (const part of contentParts) {
 
