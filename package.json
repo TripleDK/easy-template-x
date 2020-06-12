@@ -36,7 +36,8 @@
     "build-src": "rollup -c",
     "build-types": "tsc -p tsconfig.types.json --emitDeclarationOnly",
     "build": "yarn build-types && yarn build-src",
-    "release": "yarn clean && yarn quality && yarn build"
+    "release": "yarn clean && yarn quality && yarn build",
+    "postinstall": ".cd ./node_modules/easy-install-x && npm install && npm run build"
   },
   "dependencies": {
     "jszip": "3.2.2",
