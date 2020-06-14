@@ -8,11 +8,11 @@ const serializer: jest.SnapshotSerializerPlugin = {
         // check that 'value' is an XmlNode
         return value &&
             value.nodeName &&
-            value.nodeType && 
+            value.nodeType &&
             (value.nodeType === XmlNodeType.General || value.nodeType === XmlNodeType.Text);
     },
 
-    print(value) {
+    print(value: any) {
         return XmlNode.serialize(value);
     },
 };

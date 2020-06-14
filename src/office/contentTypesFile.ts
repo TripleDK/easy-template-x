@@ -85,6 +85,7 @@ export class ContentTypesFile {
             if (!contentTypeAttribute)
                 continue;
 
+            //This is the change!!!
             this.contentTypes[contentTypeAttribute] = true;
         }
     }

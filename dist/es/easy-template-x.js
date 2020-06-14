@@ -1448,7 +1448,7 @@ class ImagePlugin extends TemplatePlugin {
 
     const mediaFilePath = await context.docx.mediaFiles.add(content.source, content.format);
     const relType = MimeTypeHelper.getOfficeRelType(content.format);
-    const relId = await context.docx.rels.add(mediaFilePath, relType);
+    const relId = await context.currentPart.rels.add(mediaFilePath, relType);
     await context.docx.contentTypes.ensureContentType(content.format); // create the xml markup
 
     const imageId = nextImageId++;
@@ -1565,6 +1565,7 @@ class ContentTypesFile {
     // parse the content types file
     await this.parseContentTypesFile(); // already exists
 
+    console.log("Checking for content type: " + mime);
     if (this.contentTypes[mime]) return; // add new
 
     const extension = MimeTypeHelper.getDefaultExtension(mime);
@@ -1608,8 +1609,9 @@ class ContentTypesFile {
       if (node.nodeName !== 'Default') continue;
       const genNode = node;
       const contentTypeAttribute = genNode.attributes['ContentType'];
-      if (!contentTypeAttribute) continue;
-      this.contentTypes[contentTypeAttribute];
+      if (!contentTypeAttribute) continue; //This is the change!!!
+
+      this.contentTypes[contentTypeAttribute] = true;
     }
   }
 
@@ -1690,18 +1692,59 @@ class MediaFiles {
 
 _defineProperty(MediaFiles, "mediaDir", 'word/media');
 
+class Relationship {
+  static fromXml(xml) {
+    var _xml$attributes, _xml$attributes2, _xml$attributes3, _xml$attributes4;
+
+    return new Relationship({
+      id: (_xml$attributes = xml.attributes) === null || _xml$attributes === void 0 ? void 0 : _xml$attributes['Id'],
+      type: (_xml$attributes2 = xml.attributes) === null || _xml$attributes2 === void 0 ? void 0 : _xml$attributes2['Type'],
+      target: (_xml$attributes3 = xml.attributes) === null || _xml$attributes3 === void 0 ? void 0 : _xml$attributes3['Target'],
+      targetMode: (_xml$attributes4 = xml.attributes) === null || _xml$attributes4 === void 0 ? void 0 : _xml$attributes4['TargetMode']
+    });
+  }
+
+  constructor(initial) {
+    _defineProperty(this, "id", void 0);
+
+    _defineProperty(this, "type", void 0);
+
+    _defineProperty(this, "target", void 0);
+
+    _defineProperty(this, "targetMode", void 0);
+
+    Object.assign(this, initial);
+  }
+
+  toXml() {
+    const node = XmlNode.createGeneralNode('Relationship');
+    node.attributes = {}; // set only non-empty attributes
+
+    for (const propKey of Object.keys(this)) {
+      const value = this[propKey];
+
+      if (value && typeof value === 'string') {
+        const attrName = propKey[0].toUpperCase() + propKey.substr(1);
+        node.attributes[attrName] = value;
+      }
+    }
+
+    return node;
+  }
+
+}
+
 /**
  * Handles the relationship logic of a single docx "part".
  * http://officeopenxml.com/anatomyofOOXML.php
  */
+
 class Rels {
   constructor(partPath, zip, xmlParser) {
     this.zip = zip;
     this.xmlParser = xmlParser;
 
-    _defineProperty(this, "root", void 0);
-
-    _defineProperty(this, "relIds", void 0);
+    _defineProperty(this, "rels", void 0);
 
     _defineProperty(this, "relTargets", void 0);
 
@@ -1720,7 +1763,7 @@ class Rels {
    */
 
 
-  async add(relTarget, relType, additionalAttributes) {
+  async add(relTarget, relType, relTargetMode) {
     // if relTarget is an internal file it should be relative to the part dir
     if (relTarget.startsWith(this.partDir)) {
       relTarget = relTarget.substr(this.partDir.length + 1);
@@ -1731,21 +1774,25 @@ class Rels {
 
     const relTargetKey = this.getRelTargetKey(relType, relTarget);
     let relId = this.relTargets[relTargetKey];
-    if (relId) return relId; // add rel node
+    if (relId) return relId; // create rel node
 
     relId = this.getNextRelId();
-    const relNode = XmlNode.createGeneralNode('Relationship');
-    relNode.attributes = Object.assign({
-      "Id": relId,
-      "Type": relType,
-      "Target": relTarget
-    }, additionalAttributes);
-    this.root.childNodes.push(relNode); // update lookups
+    const rel = new Relationship({
+      id: relId,
+      type: relType,
+      target: relTarget,
+      targetMode: relTargetMode
+    }); // update lookups
 
-    this.relIds[relId] = true;
+    this.rels[relId] = rel;
     this.relTargets[relTargetKey] = relId; // return
 
     return relId;
+  }
+
+  async list() {
+    await this.parseRelsFile();
+    return Object.values(this.rels);
   }
   /**
    * Save the rels file back to the zip.
@@ -1755,8 +1802,12 @@ class Rels {
 
   async save() {
     // not change - no need to save
-    if (!this.root) return;
-    const xmlContent = this.xmlParser.serialize(this.root);
+    if (!this.rels) return; // create rels xml
+
+    const root = this.createRootNode();
+    root.childNodes = Object.values(this.rels).map(rel => rel.toXml()); // serialize and save
+
+    const xmlContent = this.xmlParser.serialize(root);
     this.zip.setFile(this.relsFilePath, xmlContent);
   } //
   // private methods
@@ -1769,36 +1820,37 @@ class Rels {
     do {
       this.nextRelId++;
       relId = 'rId' + this.nextRelId;
-    } while (this.relIds[relId]);
+    } while (this.rels[relId]);
 
     return relId;
   }
 
   async parseRelsFile() {
-    if (this.root) return; // parse the xml file
+    // already parsed
+    if (this.rels) return; // parse xml
 
-    let relsXml;
+    let root;
     const relsFile = this.zip.getFile(this.relsFilePath);
 
     if (relsFile) {
-      relsXml = await relsFile.getContentText();
+      const xml = await relsFile.getContentText();
+      root = this.xmlParser.parse(xml);
     } else {
-      relsXml = `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-                      </Relationships>`;
-    }
+      root = this.createRootNode();
+    } // parse relationship nodes
 
-    this.root = this.xmlParser.parse(relsXml); // build lookups
 
-    this.relIds = {};
+    this.rels = {};
     this.relTargets = {};
 
-    for (const rel of this.root.childNodes) {
-      const attributes = rel.attributes;
-      if (!attributes) continue; // relIds lookup
-
+    for (const relNode of root.childNodes) {
+      const attributes = relNode.attributes;
+      if (!attributes) continue;
       const idAttr = attributes['Id'];
-      if (!idAttr) continue;
-      this.relIds[idAttr] = true; // rel target lookup
+      if (!idAttr) continue; // store rel
+
+      const rel = Relationship.fromXml(relNode);
+      this.rels[idAttr] = rel; // create rel target lookup
 
       const typeAttr = attributes['Type'];
       const targetAttr = attributes['Target'];
@@ -1814,6 +1866,77 @@ class Rels {
     return `${type} - ${target}`;
   }
 
+  createRootNode() {
+    const root = XmlNode.createGeneralNode('Relationships');
+    root.attributes = {
+      'xmlns': 'http://schemas.openxmlformats.org/package/2006/relationships'
+    };
+    root.childNodes = [];
+    return root;
+  }
+
+}
+
+/**
+ * Represents an xml file that is part of an OPC package.
+ *
+ * See: https://en.wikipedia.org/wiki/Open_Packaging_Conventions
+ */
+
+class XmlPart {
+  constructor(path, zip, xmlParser) {
+    this.path = path;
+    this.zip = zip;
+    this.xmlParser = xmlParser;
+
+    _defineProperty(this, "rels", void 0);
+
+    _defineProperty(this, "root", void 0);
+
+    this.rels = new Rels(this.path, zip, xmlParser);
+  } //
+  // public methods
+  //
+
+  /**
+   * Get the xml root node of the part.
+   * Changes to the xml will be persisted to the underlying zip file.
+   */
+
+
+  async xmlRoot() {
+    if (!this.root) {
+      const xml = await this.zip.getFile(this.path).getContentText();
+      this.root = this.xmlParser.parse(xml);
+    }
+
+    return this.root;
+  }
+  /**
+   * Get the text content of the part.
+   */
+
+
+  async getText() {
+    const xmlDocument = await this.xmlRoot(); // ugly but good enough...
+
+    const xml = this.xmlParser.serialize(xmlDocument);
+    const domDocument = this.xmlParser.domParse(xml);
+    return domDocument.documentElement.textContent;
+  }
+
+  async saveChanges() {
+    // save xml
+    if (this.root) {
+      const xmlRoot = await this.xmlRoot();
+      const xmlContent = this.xmlParser.serialize(xmlRoot);
+      this.zip.setFile(this.path, xmlContent);
+    } // save rels
+
+
+    await this.rels.save();
+  }
+
 }
 
 /**
@@ -1821,19 +1944,6 @@ class Rels {
  */
 
 class Docx {
-  get documentPath() {
-    if (!this._documentPath) {
-      if (this.zip.isFileExist("word/document.xml")) {
-        this._documentPath = "word/document.xml";
-      } // https://github.com/open-xml-templating/docxtemplater/issues/366
-      else if (this.zip.isFileExist("word/document2.xml")) {
-          this._documentPath = "word/document2.xml";
-        }
-    }
-
-    return this._documentPath;
-  }
-
   /**
    * **Notice:** You should only use this property if there is no other way to
    * do what you need. Use with caution.
@@ -1846,18 +1956,19 @@ class Docx {
     this.zip = zip;
     this.xmlParser = xmlParser;
 
-    _defineProperty(this, "rels", void 0);
+    _defineProperty(this, "mainDocument", void 0);
 
     _defineProperty(this, "mediaFiles", void 0);
 
     _defineProperty(this, "contentTypes", void 0);
 
-    _defineProperty(this, "_documentPath", void 0);
+    _defineProperty(this, "_headers", void 0);
 
-    _defineProperty(this, "_document", void 0);
+    _defineProperty(this, "_footers", void 0);
 
-    if (!this.documentPath) throw new MalformedFileError('docx');
-    this.rels = new Rels(this.documentPath, zip, xmlParser);
+    const mainDocumentPath = this.getMainDocumentPath();
+    if (!mainDocumentPath) throw new MalformedFileError('docx');
+    this.mainDocument = new XmlPart(mainDocumentPath, zip, xmlParser);
     this.mediaFiles = new MediaFiles(zip);
     this.contentTypes = new ContentTypesFile(zip, xmlParser);
   } //
@@ -1865,29 +1976,30 @@ class Docx {
   //
 
   /**
-   * The xml root of the main document file.
+   * Returns the xml parts of the main document, headers and footers.
    */
 
 
-  async getDocument() {
-    if (!this._document) {
-      const xml = await this.zip.getFile(this.documentPath).getContentText();
-      this._document = this.xmlParser.parse(xml);
-    }
-
-    return this._document;
+  async getContentParts() {
+    const headers = await this.getHeaders();
+    const footers = await this.getFooters();
+    return [this.mainDocument, ...headers, ...footers];
   }
-  /**
-   * Get the text content of the main document file.
-   */
 
+  async getHeaders() {
+    if (this._headers) return this._headers;
+    const rels = await this.mainDocument.rels.list();
+    const headerRels = rels.filter(rel => rel.type === Docx.headerRelType);
+    this._headers = headerRels.map(rel => new XmlPart("word/" + rel.target, this.zip, this.xmlParser));
+    return this._headers;
+  }
 
-  async getDocumentText() {
-    const xmlDocument = await this.getDocument(); // ugly but good enough...
-
-    const xml = this.xmlParser.serialize(xmlDocument);
-    const domDocument = this.xmlParser.domParse(xml);
-    return domDocument.documentElement.textContent;
+  async getFooters() {
+    if (this._footers) return this._footers;
+    const rels = await this.mainDocument.rels.list();
+    const footerRels = rels.filter(rel => rel.type === Docx.footerRelType);
+    this._footers = footerRels.map(rel => new XmlPart("word/" + rel.target, this.zip, this.xmlParser));
+    return this._footers;
   }
 
   async export(outputType) {
@@ -1898,17 +2010,28 @@ class Docx {
   //
 
 
-  async saveChanges() {
-    // save main document
-    const document = await this.getDocument();
-    const xmlContent = this.xmlParser.serialize(document);
-    this.zip.setFile(this.documentPath, xmlContent); // save other parts
+  getMainDocumentPath() {
+    if (this.zip.isFileExist("word/document.xml")) return "word/document.xml"; // https://github.com/open-xml-templating/docxtemplater/issues/366
 
-    await this.rels.save();
+    if (this.zip.isFileExist("word/document2.xml")) return "word/document2.xml";
+    return null;
+  }
+
+  async saveChanges() {
+    const parts = [this.mainDocument, ...(this._headers || []), ...(this._footers || [])];
+
+    for (const part of parts) {
+      await part.saveChanges();
+    }
+
     await this.contentTypes.save();
   }
 
 }
+
+_defineProperty(Docx, "headerRelType", 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/header');
+
+_defineProperty(Docx, "footerRelType", 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer');
 
 class DocxParser {
   /*
@@ -2198,10 +2321,7 @@ class LinkPlugin extends TemplatePlugin {
     } // add rel
 
 
-    const linkAttributes = {
-      TargetMode: 'External'
-    };
-    const relId = await context.docx.rels.add(content.target, LinkPlugin.linkRelType, linkAttributes); // generate markup
+    const relId = await context.currentPart.rels.add(content.target, LinkPlugin.linkRelType, 'External'); // generate markup
 
     const wordRunNode = this.utilities.docxParser.containingRunNode(wordTextNode);
     const linkMarkup = this.generateMarkup(content, relId, wordRunNode); // add to document
@@ -2913,29 +3033,36 @@ class TemplateHandler {
   }
 
   async process(templateFile, data) {
-    var _this$options$extensi5, _this$options$extensi6;
-
     // load the docx file
-    const docx = await this.loadDocx(templateFile);
-    const document = await docx.getDocument(); // prepare context
+    const docx = await this.loadDocx(templateFile); // prepare context
 
     const scopeData = new ScopeData(data);
     const context = {
-      docx
-    }; // extensions - before compilation
+      docx,
+      currentPart: null
+    };
+    const contentParts = await docx.getContentParts();
 
-    await this.callExtensions((_this$options$extensi5 = this.options.extensions) === null || _this$options$extensi5 === void 0 ? void 0 : _this$options$extensi5.beforeCompilation, scopeData, context); // compilation (do replacements)
+    for (const part of contentParts) {
+      var _this$options$extensi5, _this$options$extensi6;
 
-    await this.compiler.compile(document, scopeData, context); // extensions - after compilation
+      context.currentPart = part; // extensions - before compilation
 
-    await this.callExtensions((_this$options$extensi6 = this.options.extensions) === null || _this$options$extensi6 === void 0 ? void 0 : _this$options$extensi6.afterCompilation, scopeData, context); // export the result
+      await this.callExtensions((_this$options$extensi5 = this.options.extensions) === null || _this$options$extensi5 === void 0 ? void 0 : _this$options$extensi5.beforeCompilation, scopeData, context); // compilation (do replacements)
+
+      const xmlRoot = await part.xmlRoot();
+      await this.compiler.compile(xmlRoot, scopeData, context); // extensions - after compilation
+
+      await this.callExtensions((_this$options$extensi6 = this.options.extensions) === null || _this$options$extensi6 === void 0 ? void 0 : _this$options$extensi6.afterCompilation, scopeData, context);
+    } // export the result
+
 
     return docx.export(templateFile.constructor);
   }
 
   async parseTags(templateFile) {
     const docx = await this.loadDocx(templateFile);
-    const document = await docx.getDocument();
+    const document = await docx.mainDocument.xmlRoot();
     return this.compiler.parseTags(document);
   }
   /**
@@ -2945,17 +3072,17 @@ class TemplateHandler {
 
   async getText(docxFile) {
     const docx = await this.loadDocx(docxFile);
-    const text = await docx.getDocumentText();
+    const text = await docx.mainDocument.getText();
     return text;
   }
   /**
-   * Get the xml tree of the main document file.
+   * Get the xml root of the main document file.
    */
 
 
   async getXml(docxFile) {
     const docx = await this.loadDocx(docxFile);
-    const document = await docx.getDocument();
+    const document = await docx.mainDocument.xmlRoot();
     return document;
   } //
   // private methods
@@ -2987,4 +3114,4 @@ class TemplateHandler {
 
 }
 
-export { Base64, Binary, DelimiterSearcher, Delimiters, Docx, DocxParser, ImagePlugin, LOOP_CONTENT_TYPE, LinkPlugin, LoopPlugin, MalformedFileError, MaxXmlDepthError, MimeType, MimeTypeHelper, MissingArgumentError, MissingCloseDelimiterError, MissingStartDelimiterError, Path, PluginContent, RawXmlPlugin, Regex, ScopeData, TEXT_CONTENT_TYPE, TEXT_NODE_NAME, TagDisposition, TagParser, TemplateCompiler, TemplateExtension, TemplateHandler, TemplateHandlerOptions, TemplatePlugin, TextPlugin, UnclosedTagError, UnidentifiedFileTypeError, UnknownContentTypeError, UnopenedTagError, UnsupportedFileTypeError, XmlDepthTracker, XmlNode, XmlNodeType, XmlParser, Zip, ZipObject, createDefaultPlugins, first, inheritsFrom, isPromiseLike, last, pushMany, sha1, toDictionary };
+export { Base64, Binary, DelimiterSearcher, Delimiters, Docx, DocxParser, ImagePlugin, LOOP_CONTENT_TYPE, LinkPlugin, LoopPlugin, MalformedFileError, MaxXmlDepthError, MimeType, MimeTypeHelper, MissingArgumentError, MissingCloseDelimiterError, MissingStartDelimiterError, Path, PluginContent, RawXmlPlugin, Regex, ScopeData, TEXT_CONTENT_TYPE, TEXT_NODE_NAME, TagDisposition, TagParser, TemplateCompiler, TemplateExtension, TemplateHandler, TemplateHandlerOptions, TemplatePlugin, TextPlugin, UnclosedTagError, UnidentifiedFileTypeError, UnknownContentTypeError, UnopenedTagError, UnsupportedFileTypeError, XmlDepthTracker, XmlNode, XmlNodeType, XmlParser, XmlPart, Zip, ZipObject, createDefaultPlugins, first, inheritsFrom, isPromiseLike, last, pushMany, sha1, toDictionary };

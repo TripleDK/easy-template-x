@@ -39,7 +39,7 @@
     "release": "yarn clean && yarn quality && yarn build"
   },
   "dependencies": {
-    "jszip": "3.2.2",
+    "jszip": "^3.2.2",
     "lodash.get": "4.4.2",
     "xmldom": "0.2.1"
   },
@@ -54,7 +54,7 @@
     "@rollup/plugin-replace": "2.3.1",
     "@types/jest": "25.1.2",
     "@types/jszip": "3.1.7",
-    "@types/node": "13.7.0",
+    "@types/node": "^13.7.0",
     "@types/xmldom": "0.1.29",
     "@typescript-eslint/eslint-plugin": "2.19.0",
     "@typescript-eslint/parser": "2.19.0",
