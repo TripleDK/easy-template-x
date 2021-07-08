@@ -1419,6 +1419,9 @@ class TemplatePlugin {
 }
 
 /**
+ * UPDATE: Apparently it IS important for the ID to be unique even among header/body/footer.
+ * Tested in Word v2106
+ * 
  * Apparently it is not that important for the ID to be unique...
  * Word displays two images correctly even if they both have the same ID.
  * Further more, Word will assign each a unique ID upon saving (it assigns
@@ -1427,8 +1430,11 @@ class TemplatePlugin {
  * Note: The same principal applies to image names.
  *
  * Tested in Word v1908
+ * 
+ * 
+ * 
  */
-let nextImageId = 1;
+let nextImageId = 10000;
 class ImagePlugin extends TemplatePlugin {
   constructor(...args) {
     super(...args);
