@@ -70,7 +70,7 @@ export class ImagePlugin extends TemplatePlugin {
                     </wp:cNvGraphicFramePr>
                     <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
                         <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
-                            ${this.pictureMarkup(name, relId, width, height)}
+                            ${this.pictureMarkup(name, imageId, relId, width, height)}
                         </a:graphicData>
                     </a:graphic>
                 </wp:inline>
@@ -83,7 +83,7 @@ export class ImagePlugin extends TemplatePlugin {
         return markupXml;
     }
 
-    private pictureMarkup(name: string, relId: string, width: number, height: number) {
+    private pictureMarkup(name: string, imageId: number, relId: string, width: number, height: number) {
 
         // http://officeopenxml.com/drwPic.php
 
@@ -95,7 +95,7 @@ export class ImagePlugin extends TemplatePlugin {
         return `
             <pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
                 <pic:nvPicPr>
-                    <pic:cNvPr id="0" name="${name}"/>
+                    <pic:cNvPr id="${imageId}" name="${name}"/>
                     <pic:cNvPicPr>
                         <a:picLocks noChangeAspect="1" noChangeArrowheads="1"/>
                     </pic:cNvPicPr>

@@ -249,6 +249,6 @@ describe('loop fixtures', () => {
         await handler.process(template, data);
 
         // writeTempFile('nested loop speed test - output.docx', doc);
-    }, 5 * 1000);
+    }, 10 * 1000);
 
 });

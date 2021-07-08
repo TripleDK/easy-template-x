@@ -28,7 +28,7 @@ export class ContentTypesFile {
         await this.parseContentTypesFile();
 
         // already exists
-        console.log("Checking for content type: " + mime);
+        //console.log("Checking for content type: " + mime);
         if (this.contentTypes[mime])
             return;
 

@@ -1480,7 +1480,7 @@ class ImagePlugin extends TemplatePlugin {
                     </wp:cNvGraphicFramePr>
                     <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
                         <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
-                            ${this.pictureMarkup(name, relId, width, height)}
+                            ${this.pictureMarkup(name, imageId, relId, width, height)}
                         </a:graphicData>
                     </a:graphic>
                 </wp:inline>
@@ -1492,7 +1492,7 @@ class ImagePlugin extends TemplatePlugin {
     return markupXml;
   }
 
-  pictureMarkup(name, relId, width, height) {
+  pictureMarkup(name, imageId, relId, width, height) {
     // http://officeopenxml.com/drwPic.php
     // legend:
     // nvPicPr - non-visual picture properties - id, name, etc.
@@ -1501,7 +1501,7 @@ class ImagePlugin extends TemplatePlugin {
     return `
             <pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
                 <pic:nvPicPr>
-                    <pic:cNvPr id="0" name="${name}"/>
+                    <pic:cNvPr id="${imageId}" name="${name}"/>
                     <pic:cNvPicPr>
                         <a:picLocks noChangeAspect="1" noChangeArrowheads="1"/>
                     </pic:cNvPicPr>
@@ -1564,8 +1564,8 @@ class ContentTypesFile {
   async ensureContentType(mime) {
     // parse the content types file
     await this.parseContentTypesFile(); // already exists
+    //console.log("Checking for content type: " + mime);
 
-    console.log("Checking for content type: " + mime);
     if (this.contentTypes[mime]) return; // add new
 
     const extension = MimeTypeHelper.getDefaultExtension(mime);

@@ -166,5 +166,5 @@ describe('image fixtures', () => {
 
         await handler.process(template, data);
 
-    }, 3 * 1000);
+    }, 4 * 1000);
 });
